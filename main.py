@@ -9,10 +9,10 @@ app = Flask(__name__)
 # Конфигурации
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-PROJECT_ID = os.getenv("DIALOGFLOW_PROJECT_ID")
+PROJECT_ID = "freebot-461207"
 
 # Аутентикация с Service Account JSON
-CREDENTIALS_FILE = "/etc/secrets/freestreets-1736017814504-2e3680439af6.json"
+CREDENTIALS_FILE = "/etc/secrets/freebot-461207-c76a09ed3cfa.json"
 SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
 credentials = service_account.Credentials.from_service_account_file(
