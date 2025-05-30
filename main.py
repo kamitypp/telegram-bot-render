@@ -24,16 +24,13 @@ def get_dialogflow_token():
         credentials.refresh(Request())
     return credentials.token
 
-# Получаване на отговор от Dialogflow
 def detect_intent_text(text, session_id):
     token = get_dialogflow_token()
     url = f"https://dialogflow.googleapis.com/v2/projects/{PROJECT_ID}/agent/sessions/{session_id}:detectIntent"
-
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json; charset=utf-8"
     }
-
     body = {
         "queryInput": {
             "text": {
@@ -42,35 +39,27 @@ def detect_intent_text(text, session_id):
             }
         }
     }
-
     response = requests.post(url, headers=headers, json=body)
-
     if response.status_code != 200:
         print("❌ Грешка при свързване с Dialogflow:", response.text)
         return "🤖 Грешка при свързване с Dialogflow."
-
     return response.json().get("queryResult", {}).get("fulfillmentText", "🤖 Няма отговор.")
 
 # Webhook за Telegram
-@app.route("/", methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
-
     message = data.get("message", {})
     chat_id = message.get("chat", {}).get("id")
     text = message.get("text")
-
     if chat_id and text:
         reply = detect_intent_text(text, session_id=str(chat_id))
-
         requests.post(TELEGRAM_API_URL, json={
             "chat_id": chat_id,
             "text": reply
         })
-
     return {"ok": True}
 
-# За тест че е онлайн
 @app.route("/", methods=["GET"])
 def index():
     return "🤖 Bot is live!"
