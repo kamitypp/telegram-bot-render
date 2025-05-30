@@ -42,7 +42,7 @@ def detect_intent_text(text, session_id):
     response = requests.post(url, headers=headers, json=body)
     if response.status_code != 200:
         print("❌ Грешка при свързване с Dialogflow:", response.text)
-        print("🧪 Dialogflow raw response:", response.json())
+        print("Dialogflow response JSON:", response.json())
         return "🤖 Грешка при свързване с Dialogflow."
     return response.json().get("queryResult", {}).get("fulfillmentText", "🤖 Няма отговор.")
 
