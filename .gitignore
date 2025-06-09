@@ -1,2 +1,13 @@
-freestreets-1736017814504-2e3680439af6.json
-freestreets-*.json
+# Python
+*.pyc
+__pycache__/
+
+# Secrets / Keys
+*.json
+
+# Virtual environments
+venv/
+.env
+
+# macOS system files
+.DS_Store

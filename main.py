@@ -1,93 +1,70 @@
 import os
-import logging
+import json
 import requests
 from flask import Flask, request
-from google.oauth2 import service_account
 from google.auth.transport.requests import Request
-
-logging.basicConfig(level=logging.INFO)
+from google.oauth2 import service_account
 
 app = Flask(__name__)
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-PROJECT_ID = "freebot-461207"
-CREDENTIALS_FILE = "/etc/secrets/freebot-461207-c76a09ed3cfa.json"
-SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
-
-if not TELEGRAM_TOKEN:
-    raise ValueError("❌ TELEGRAM_TOKEN missing")
-if not os.path.exists(CREDENTIALS_FILE):
-    raise FileNotFoundError(f"❌ Credentials file not found: {CREDENTIALS_FILE}")
-
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-
-credentials = service_account.Credentials.from_service_account_file(
-    CREDENTIALS_FILE, scopes=SCOPES
+# Зареждаме service account credentials
+SCOPES = ['https://www.googleapis.com/auth/cloud-platform']
+SERVICE_ACCOUNT_FILE = "/etc/secrets/freestreets-1736017814504-fb8a19bd0fed.json"
+creds = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE, scopes=SCOPES
 )
 
-def get_dialogflow_token():
-    if not credentials.valid or credentials.expired:
-        credentials.refresh(Request())
-    return credentials.token
+)
+
+# Правилна конфигурация на CX агента
+PROJECT_ID = "freestreets-1736017814504"
+REGION = "europe-west3"
+AGENT_ID = "95163a7e-670b-4e91-bbd6-71df5db9feaf"
+LANGUAGE_CODE = "bg"
 
 def detect_intent_text(text, session_id):
-    token = get_dialogflow_token()
-    url = f"https://dialogflow.googleapis.com/v2/projects/{PROJECT_ID}/agent/sessions/{session_id}:detectIntent"
+    session = f"projects/{PROJECT_ID}/locations/{REGION}/agents/{AGENT_ID}/sessions/{session_id}"
 
+    creds.refresh(Request())
+    url = f"https://{REGION}-dialogflow.googleapis.com/v3/{session}:detectIntent"
     headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json; charset=utf-8"
+        "Authorization": f"Bearer {creds.token}",
+        "Content-Type": "application/json"
     }
+
     body = {
         "queryInput": {
-            "text": {"text": text, "languageCode": "bg"}
+            "text": {
+                "text": text
+            },
+            "languageCode": LANGUAGE_CODE
         }
     }
 
-    try:
-        response = requests.post(url, headers=headers, json=body, timeout=5)
-        logging.info("🎯 DF status: %s", response.status_code)
-        logging.info("📦 DF raw: %s", response.text)
+    response = requests.post(url, headers=headers, json=body)
+    response_data = response.json()
 
-        if response.status_code != 200:
-            return "🤖 Грешка свързване с Dialogflow."
+    return response_data.get("queryResult", {}).get("responseMessages", [{}])[0].get("text", {}).get("text", ["🤖 Няма отговор."])[0]
 
-        data = response.json()
-        logging.info("📦 DF JSON: %s", data)
-        fulfillment = data.get("queryResult", {}).get("fulfillmentText")
-        logging.info("📦 fulfillmentText: %s", fulfillment)
-
-        return fulfillment or "🤖 Няма отговор."
-
-    except requests.RequestException as e:
-        logging.error("⚠️ Exception при Dialogflow: %s", e)
-        return "🤖 Възникна грешка при dialogflow."
+# TELEGRAM обработка
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
-    logging.info("📥 From Telegram: %s", data)
 
-    message = data.get("message", {})
-    chat_id = message.get("chat", {}).get("id")
-    text = message.get("text")
+    if "message" in data:
+        chat_id = data["message"]["chat"]["id"]
+        text = data["message"].get("text", "")
+        reply = detect_intent_text(text, str(chat_id))
 
-    if not chat_id or not text:
-        logging.warning("⚠️ Няма chat_id или текст")
-        return {"ok": True}
+        requests.post(TELEGRAM_API, json={
+            "chat_id": chat_id,
+            "text": reply
+        })
 
-    reply = detect_intent_text(text, session_id=str(chat_id))
-    logging.info("↩️ Reply to send: %s", reply)
-
-    requests.post(TELEGRAM_API_URL, json={
-        "chat_id": chat_id,
-        "text": reply
-    }, timeout=5)
-    return {"ok": True}
-
-@app.route("/", methods=["GET"])
-def index():
-    return "🤖 Bot is live!"
+    return "ok"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run()
