@@ -57,6 +57,7 @@ def detect_intent_text(text, session_id):
     try:
         response = requests.post(url, headers=headers, json=body, timeout=5)
         logging.info("🎯 Dialogflow response: %s", response.json())
+        print("📦 Dialogflow JSON:", response.json())  # 👉 добавен print
 
         if response.status_code != 200:
             return "🤖 Грешка при свързване с Dialogflow."
