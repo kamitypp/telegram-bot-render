@@ -14,7 +14,6 @@ creds = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE, scopes=SCOPES
 )
 
-
 # Правилна конфигурация на CX агента
 PROJECT_ID = "freestreets-1736017814504"
 REGION = "europe-west3"
