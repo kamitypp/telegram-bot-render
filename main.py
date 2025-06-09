@@ -54,14 +54,19 @@ def detect_intent_text(text, session_id):
         }
     }
 
-    try:
+        try:
         response = requests.post(url, headers=headers, json=body, timeout=5)
-        print("🎯 Dialogflow response:", response.json())
+        print("🎯 Dialogflow status:", response.status_code)
+        print("🎯 Dialogflow raw response:", response.text)
 
         if response.status_code != 200:
             return "🤖 Грешка при свързване с Dialogflow."
 
+        print("📦 Dialogflow response JSON:", response.json())
+        print("📦 FulfillmentText:", response.json().get("queryResult", {}).get("fulfillmentText"))
+
         return response.json().get("queryResult", {}).get("fulfillmentText", "🤖 Няма отговор.")
+
 
     except requests.RequestException as e:
         print("⚠️ Exception при заявка към Dialogflow:", e)
