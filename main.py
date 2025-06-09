@@ -1,20 +1,32 @@
 import os
+import logging
 import requests
 from flask import Flask, request
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request
 
+# Настройка на логове
+logging.basicConfig(level=logging.INFO)
+
+# Flask приложение
 app = Flask(__name__)
 
-# Конфигурации
+# Променливи на средата
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 PROJECT_ID = "freebot-461207"
-
-# Аутентикация с Service Account JSON
 CREDENTIALS_FILE = "/etc/secrets/freebot-461207-c76a09ed3cfa.json"
 SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
+# Проверки
+if not TELEGRAM_TOKEN:
+    raise ValueError("❌ TELEGRAM_TOKEN липсва в средата.")
+
+if not os.path.exists(CREDENTIALS_FILE):
+    raise FileNotFoundError(f"❌ Service account файлът не съществува: {CREDENTIALS_FILE}")
+
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+
+# Google Credentials
 credentials = service_account.Credentials.from_service_account_file(
     CREDENTIALS_FILE, scopes=SCOPES
 )
@@ -27,10 +39,12 @@ def get_dialogflow_token():
 def detect_intent_text(text, session_id):
     token = get_dialogflow_token()
     url = f"https://dialogflow.googleapis.com/v2/projects/{PROJECT_ID}/agent/sessions/{session_id}:detectIntent"
+
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json; charset=utf-8"
     }
+
     body = {
         "queryInput": {
             "text": {
@@ -39,31 +53,49 @@ def detect_intent_text(text, session_id):
             }
         }
     }
-    response = requests.post(url, headers=headers, json=body)
-    if response.status_code != 200:
-        print("❌ Грешка при свързване с Dialogflow:", response.text)
-        print("Dialogflow response JSON:", response.json())
-        return "🤖 Грешка при свързване с Dialogflow."
-    return response.json().get("queryResult", {}).get("fulfillmentText", "🤖 Няма отговор.")
+
+    try:
+        response = requests.post(url, headers=headers, json=body, timeout=5)
+        logging.info("🎯 Dialogflow response: %s", response.json())
+
+        if response.status_code != 200:
+            return "🤖 Грешка при свързване с Dialogflow."
+
+        return response.json().get("queryResult", {}).get("fulfillmentText", "🤖 Няма отговор.")
+
+    except requests.RequestException as e:
+        logging.error("⚠️ Exception при заявка към Dialogflow: %s", e)
+        return "🤖 Възникна грешка при свързване с Dialogflow."
 
 # Webhook за Telegram
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
+    logging.info("📥 Получено от Telegram: %s", data)
+
     message = data.get("message", {})
     chat_id = message.get("chat", {}).get("id")
     text = message.get("text")
-    if chat_id and text:
-        reply = detect_intent_text(text, session_id=str(chat_id))
-        requests.post(TELEGRAM_API_URL, json={
-            "chat_id": chat_id,
-            "text": reply
-        })
+
+    if not chat_id or not text:
+        logging.warning("⚠️ Липсващ chat_id или текст.")
+        return {"ok": True}
+
+    reply = detect_intent_text(text, session_id=str(chat_id))
+
+    # Изпращане на отговора обратно към Telegram
+    requests.post(TELEGRAM_API_URL, json={
+        "chat_id": chat_id,
+        "text": reply
+    }, timeout=5)
+
     return {"ok": True}
 
+# Пинг роут
 @app.route("/", methods=["GET"])
 def index():
     return "🤖 Bot is live!"
 
+# Стартиране (локално)
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
