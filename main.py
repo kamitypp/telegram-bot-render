@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # --- Database Configuration ---
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///site.db' # Това е SQLite база данни, ще бъде файл site.db
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get("DATABASE_URL")
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # Препоръчително е да е False
 db = SQLAlchemy(app)
 
@@ -297,10 +297,6 @@ if __name__ == '__main__':
     # Initialize logging (moved here for clarity, though already at top)
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
-
-    with app.app_context():
-    db.create_all()
-    print("Database tables created!")
 
     with app.app_context():
         db.create_all() # Creates tables in the database if they don't exist
