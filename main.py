@@ -299,6 +299,10 @@ if __name__ == '__main__':
     logger = logging.getLogger(__name__)
 
     with app.app_context():
+    db.create_all()
+    print("Database tables created!")
+
+    with app.app_context():
         db.create_all() # Creates tables in the database if they don't exist
         logger.info("Database tables checked/created.")
     # For Render, the port is usually 10000. For local testing, 5000 is common.
