@@ -1,6 +1,7 @@
 Flask
-gunicorn
+gunicorn                 # <--- ТОЗИ ПАКЕТ Е НУЖЕН ЗА ДЕПЛОЙ НА RENDER
 requests
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
+google-auth              # <--- ТОЗИ ПАКЕТ Е НУЖЕН ЗА АВТЕНТИКАЦИЯ
+google-cloud-dialogflow-cx # <-- ВАЖНО: Уверете се, че тази библиотека е там!
+Flask-SQLAlchemy
+psycopg2-binary          # <--- ТОЗИ ПАКЕТ Е НУЖЕН ЗА POSTGRESQL В RENDER
