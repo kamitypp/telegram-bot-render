@@ -191,6 +191,7 @@ def webhook():
             user_id=user.id,
             message_type='inbound',
             message_text=user_input, 
+            is_from_user=True,
             raw_telegram_json=telegram_raw_json
         )
         db.session.add(inbound_msg)
