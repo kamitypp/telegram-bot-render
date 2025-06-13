@@ -44,12 +44,11 @@ class ChatMessage(db.Model):
     is_from_user = db.Column(db.Boolean, nullable=False) # True if from user, False if from bot
     timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
 
-    # !!! МНОГО ВАЖНО: ТЕЗИ КОЛОНИ ТРЯБВА ДА СА ПРАВИЛНО ОТМЕСТЕНИ (4 ИНТЕРВАЛА НАВЪТРЕ) !!!
+    # !!! МНОГО ВАЖНО: ТЕЗИ КОЛОНИ ВЕЧЕ СА ПРАВИЛНО ОТМЕСТЕНИ (с 4 интервала навътре) !!!
     message_type = db.Column(db.String(50)) # 'inbound' or 'outbound'
     raw_telegram_json = db.Column(db.Text) # To store full Telegram request for inbound
     dialogflow_response_id = db.Column(db.String(255)) # ID от Dialogflow CX отговора
     raw_dialogflow_json = db.Column(db.Text) # To store full Dialogflow CX response for outbound
-    # !!! КРАЙ НА ОТМЕСТВАНЕТО !!!
 
     # Коригиран relationship, за да сочи към новия клас TelegramUser
     user = db.relationship('TelegramUser', backref=db.backref('messages', lazy=True))
@@ -179,10 +178,10 @@ def webhook():
 
     # --- DB: Log the inbound message and handle user ---
     with app.app_context():
-        # Find or create user - Използвайте TelegramUser
+        # Find or create user - ИЗПОЛЗВАЙТЕ TelegramUser (тази промяна е критична!)
         user = db.session.execute(db.select(TelegramUser).filter_by(telegram_chat_id=str(chat_id))).scalar_one_or_none() 
         if not user:
-            user = TelegramUser(telegram_chat_id=str(chat_id)) # Използвайте TelegramUser
+            user = TelegramUser(telegram_chat_id=str(chat_id)) # ИЗПОЛЗВАЙТЕ TelegramUser (тази промяна е критична!)
             db.session.add(user)
             db.session.commit() # Commit to get user.id for ChatMessage
             logger.info(f"New user created in DB with chat_id: {chat_id}")
@@ -191,7 +190,7 @@ def webhook():
         inbound_msg = ChatMessage(
             user_id=user.id,
             message_type='inbound',
-            message_text=user_input, # Използвайте message_text, а не text
+            message_text=user_input, 
             raw_telegram_json=telegram_raw_json
         )
         db.session.add(inbound_msg)
@@ -297,7 +296,7 @@ def webhook():
             outbound_msg = ChatMessage(
                 user_id=user.id,
                 message_type='outbound',
-                message_text=final_fulfillment_text, # Използвайте message_text, а не text
+                message_text=final_fulfillment_text, 
                 dialogflow_response_id=dfcx_response_dict.get('responseId'),
                 raw_dialogflow_json=json.dumps(dfcx_response_dict) # Store full DF CX response JSON
             )
