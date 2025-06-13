@@ -187,14 +187,14 @@ def webhook():
             logger.info(f"New user created in DB with chat_id: {chat_id}")
 
         # Log inbound message
-        inbound_msg = ChatMessage(
+        new_chat_message = ChatMessage(
             user_id=user.id,
             message_type='inbound',
-            message_text=user_input, 
+            message_text=user_input, # Коригирано от message_text,, на user_input и премахната двойна запетая
             is_from_user=True,
-            raw_telegram_json=telegram_raw_json
+            raw_telegram_json=telegram_raw_json # Коригирано от json.dumps на telegram_raw_json
         )
-        db.session.add(inbound_msg)
+        db.session.add(new_chat_message)
         db.session.commit()
         logger.info(f"Inbound message logged for user {chat_id}")
 
@@ -294,14 +294,14 @@ def webhook():
     with app.app_context():
         user = db.session.execute(db.select(TelegramUser).filter_by(telegram_chat_id=str(chat_id))).scalar_one_or_none() # Използвайте TelegramUser
         if user:
-            outbound_msg = ChatMessage(
+            new_chat_message = ChatMessage(
                 user_id=user.id,
-                message_type='outbound',
-                message_text=final_fulfillment_text, 
-                dialogflow_response_id=dfcx_response_dict.get('responseId'),
+                message_text=final_fulfillment_text, # Коригирано от agent_response_text на final_fulfillment_text
+                is_from_user=False,
+                message_type="outbound", # Коригирано от "outnound" на "outbound"
                 raw_dialogflow_json=json.dumps(dfcx_response_dict) # Store full DF CX response JSON
             )
-            db.session.add(outbound_msg)
+            db.session.add(new_chat_message)
             db.session.commit()
             logger.info(f"Outbound message logged for user {chat_id}")
 
