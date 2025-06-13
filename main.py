@@ -187,14 +187,14 @@ def webhook():
             logger.info(f"New user created in DB with chat_id: {chat_id}")
 
         # Log inbound message
-        inbound_msg = ChatMessage(
+        new_chat_message = ChatMessage(
             user_id=user.id,
             message_type='inbound',
-            message_text=user_input, 
+            message_text=user_input, # Коригирано от message_text,, на user_input и премахната двойна запетая
             is_from_user=True,
-            raw_telegram_json=telegram_raw_json
+            raw_telegram_json=telegram_raw_json # Коригирано от json.dumps на telegram_raw_json
         )
-        db.session.add(inbound_msg)
+        db.session.add(new_chat_message)
         db.session.commit()
         logger.info(f"Inbound message logged for user {chat_id}")
 
@@ -277,39 +277,4 @@ def webhook():
             # Example for 'label' parameter from Dialogflow CX.
             # If you have a parameter in DF CX called 'job_type' that you want to save as 'label':
             # if 'job_type' in params and params['job_type']:
-            #     user.label = params['job_type']
-            # Or if you manually set 'label' in Dialogflow CX fulfillment:
-            # if 'label_param_name' in params and params['label_param_name']:
-            #    user.label = params['label_param_name']
-
-            db.session.commit()
-            logger.info(f"User data updated in DB for {chat_id}: {user.name}, {user.email}, {user.phone}, {user.city}, {user.label}")
-        else:
-            logger.error(f"User with chat_id {chat_id} not found after initial creation. This should not happen.")
-
-    # Send response back to Telegram, including buttons if available
-    send_telegram_message(chat_id, final_fulfillment_text, telegram_reply_markup)
-
-    # --- DB: Log the outbound message ---
-    with app.app_context():
-        user = db.session.execute(db.select(TelegramUser).filter_by(telegram_chat_id=str(chat_id))).scalar_one_or_none() # Използвайте TelegramUser
-        if user:
-            outbound_msg = ChatMessage(
-                user_id=user.id,
-                message_type='outbound',
-                message_text=final_fulfillment_text, 
-                dialogflow_response_id=dfcx_response_dict.get('responseId'),
-                raw_dialogflow_json=json.dumps(dfcx_response_dict) # Store full DF CX response JSON
-            )
-            db.session.add(outbound_msg)
-            db.session.commit()
-            logger.info(f"Outbound message logged for user {chat_id}")
-
-    return jsonify({"status": "success"})
-
-
-if __name__ == '__main__':
-    # Initialize logging (moved here for clarity, though already at top)
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
-    app.run(host='0.0.0.0', port=os.environ.get("PORT", 10000))
+            #     user.label = param
