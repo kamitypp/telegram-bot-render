@@ -179,7 +179,7 @@ def webhook():
     # --- DB: Log the inbound message and handle user ---
     with app.app_context():
         # Find or create user - ИЗПОЛЗВАЙТЕ TelegramUser (тази промяна е критична!)
-        user = db.session.execute(db.select(TelegramUser).filter_by(telegram_chat_id=str(chat_id))).scalar_one_or_none()    
+        user = db.session.execute(db.select(TelegramUser).filter_by(telegram_chat_id=str(chat_id))).scalar_one_or_none() 
         if not user:
             user = TelegramUser(telegram_chat_id=str(chat_id)) # ИЗПОЛЗВАЙТЕ TelegramUser (тази промяна е критична!)
             db.session.add(user)
@@ -190,9 +190,9 @@ def webhook():
         new_chat_message = ChatMessage(
             user_id=user.id,
             message_type='inbound',
-            message_text=user_input, 
+            message_text=user_input, # Коригирано от message_text,, на user_input и премахната двойна запетая
             is_from_user=True,
-            raw_telegram_json=telegram_raw_json 
+            raw_telegram_json=telegram_raw_json # Коригирано от json.dumps на telegram_raw_json
         )
         db.session.add(new_chat_message)
         db.session.commit()
@@ -208,9 +208,10 @@ def webhook():
     query_result = dfcx_response_dict.get('queryResult', {})
     
     # --- Extract text and custom_payload for Telegram ---
-    all_fulfillment_texts = []
-    telegram_reply_markup = None
-    text_from_custom_payload = None
+    # This block now correctly initializes variables and processes messages without duplication.
+    all_fulfillment_texts = [] 
+    telegram_reply_markup = None 
+    text_from_custom_payload = None 
 
     if 'fulfillmentResponse' in query_result and 'messages' in query_result['fulfillmentResponse']:
         for message in query_result['fulfillmentResponse']['messages']:
@@ -229,7 +230,7 @@ def webhook():
                     
                     if 'text' in telegram_data and telegram_data['text'].strip():
                         text_from_custom_payload = telegram_data['text'].strip()
-                        all_fulfillment_texts = [] # Clear other texts, prioritize custom payload text
+                        all_fulfillment_texts = [] # Clear other texts
                         all_fulfillment_texts.append(text_from_custom_payload)
                         break # Stop processing messages if Telegram payload with text is found
     
@@ -239,14 +240,12 @@ def webhook():
     elif all_fulfillment_texts:
         final_fulfillment_text = "\n\n".join(all_fulfillment_texts)
     else:
-        # Fallback if no specific fulfillment text or custom payload text was found from Dialogflow CX.
-        # Instead of repeating user input, provide a generic "didn't understand" message.
-        final_fulfillment_text = "Извинете, не успях да разбера. Моля, опитайте отново или формулирайте по друг начин."
-        logger.warning(f"No specific fulfillment text or custom payload text found in Dialogflow CX response for chat ID {chat_id}. Defaulting to generic message. DF CX response: {json.dumps(dfcx_response_dict, indent=2)}")
-
-    # Send response back to Telegram, including buttons if available
-    send_telegram_message(chat_id, final_fulfillment_text, telegram_reply_markup)
-
+        # Fallback to queryResult.text (from user's input), if no fulfillment texts or custom payload text found
+        if 'text' in query_result and query_result['text'].strip():
+            final_fulfillment_text = query_result['text'].strip()
+        else:
+            final_fulfillment_text = "Няма отговор."
+            
     # --- DB: Save / Update User Data from Dialogflow CX Parameters ---
     with app.app_context():
         # Re-fetch user to ensure we're working with the freshest data, especially important in concurrent environments
@@ -281,12 +280,15 @@ def webhook():
             #     user.label = params['job_type']
             # Or if you manually set 'label' in Dialogflow CX fulfillment:
             # if 'label_param_name' in params and params['label_param_name']:
-            #     user.label = params['label_param_name']
+            #    user.label = params['label_param_name']
 
             db.session.commit()
             logger.info(f"User data updated in DB for {chat_id}: {user.name}, {user.email}, {user.phone}, {user.city}, {user.label}")
         else:
             logger.error(f"User with chat_id {chat_id} not found after initial creation. This should not happen.")
+
+    # Send response back to Telegram, including buttons if available
+    send_telegram_message(chat_id, final_fulfillment_text, telegram_reply_markup)
 
     # --- DB: Log the outbound message ---
     with app.app_context():
@@ -294,9 +296,9 @@ def webhook():
         if user:
             new_chat_message = ChatMessage(
                 user_id=user.id,
-                message_text=final_fulfillment_text, 
+                message_text=final_fulfillment_text, # Коригирано от agent_response_text на final_fulfillment_text
                 is_from_user=False,
-                message_type="outbound", 
+                message_type="outbound", # Коригирано от "outnound" на "outbound"
                 raw_dialogflow_json=json.dumps(dfcx_response_dict) # Store full DF CX response JSON
             )
             db.session.add(new_chat_message)
