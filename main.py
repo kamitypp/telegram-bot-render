@@ -21,7 +21,9 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # Препоръчител�
 db = SQLAlchemy(app)
 
 # --- Database Models ---
-class User(db.Model):
+class TelegramUser(db.Model):
+    # Коригирано __tablename__ (правилно име и без излишна кавичка)
+    __tablename__ = 'telegram_users' # Използвайте 'telegram_users' за яснота и избягване на конфликти
     id = db.Column(db.Integer, primary_key=True)
     telegram_chat_id = db.Column(db.String(255), unique=True, nullable=False)
     name = db.Column(db.String(255))
@@ -32,25 +34,30 @@ class User(db.Model):
     last_updated = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
 
     def __repr__(self):
-        return f'<User {self.telegram_chat_id}>'
+        return f'<TelegramUser {self.telegram_chat_id}>'
     
 class ChatMessage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    # Коригиран foreign key, за да сочи към новата таблица 'telegram_users'
+    user_id = db.Column(db.Integer, db.ForeignKey('telegram_users.id'), nullable=False)
     message_text = db.Column(db.Text, nullable=False)
     is_from_user = db.Column(db.Boolean, nullable=False) # True if from user, False if from bot
     timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
 
-message_type = db.Column(db.String(50)) # 'inbound' or 'outbound'
+    # !!! МНОГО ВАЖНО: ТЕЗИ КОЛОНИ ТРЯБВА ДА СА ПРАВИЛНО ОТМЕСТЕНИ (4 ИНТЕРВАЛА НАВЪТРЕ) !!!
+    message_type = db.Column(db.String(50)) # 'inbound' or 'outbound'
     raw_telegram_json = db.Column(db.Text) # To store full Telegram request for inbound
     dialogflow_response_id = db.Column(db.String(255)) # ID от Dialogflow CX отговора
     raw_dialogflow_json = db.Column(db.Text) # To store full Dialogflow CX response for outbound
+    # !!! КРАЙ НА ОТМЕСТВАНЕТО !!!
 
-    user = db.relationship('User', backref=db.backref('messages', lazy=True))
+    # Коригиран relationship, за да сочи към новия клас TelegramUser
+    user = db.relationship('TelegramUser', backref=db.backref('messages', lazy=True))
 
     def __repr__(self):
         return f'<ChatMessage {self.id} from_user={self.is_from_user}>'
     
+# Този блок е на правилното място и ще се изпълни при зареждане на модула от Gunicorn
 with app.app_context():
     db.create_all()
     logger.info("Database tables checked/created.")
@@ -158,7 +165,7 @@ def webhook():
         try:
             # Answer callback_query to remove "loading" state from the button in Telegram
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
-                          json={"callback_query_id": req["callback_query"]["id"]})
+                            json={"callback_query_id": req["callback_query"]["id"]})
         except Exception as e:
             logger.error(f"Error answering callback query: {e}")
         logger.info(f"Type: Callback Query, Chat ID: {chat_id}, Data: '{user_input}'")
@@ -172,10 +179,10 @@ def webhook():
 
     # --- DB: Log the inbound message and handle user ---
     with app.app_context():
-        # Find or create user
-        user = db.session.execute(db.select(User).filter_by(telegram_chat_id=str(chat_id))).scalar_one_or_none()
+        # Find or create user - Използвайте TelegramUser
+        user = db.session.execute(db.select(TelegramUser).filter_by(telegram_chat_id=str(chat_id))).scalar_one_or_none() 
         if not user:
-            user = User(telegram_chat_id=str(chat_id))
+            user = TelegramUser(telegram_chat_id=str(chat_id)) # Използвайте TelegramUser
             db.session.add(user)
             db.session.commit() # Commit to get user.id for ChatMessage
             logger.info(f"New user created in DB with chat_id: {chat_id}")
@@ -184,7 +191,7 @@ def webhook():
         inbound_msg = ChatMessage(
             user_id=user.id,
             message_type='inbound',
-            text=user_input,
+            message_text=user_input, # Използвайте message_text, а не text
             raw_telegram_json=telegram_raw_json
         )
         db.session.add(inbound_msg)
@@ -242,7 +249,7 @@ def webhook():
     # --- DB: Save / Update User Data from Dialogflow CX Parameters ---
     with app.app_context():
         # Re-fetch user to ensure we're working with the freshest data, especially important in concurrent environments
-        user = db.session.execute(db.select(User).filter_by(telegram_chat_id=str(chat_id))).scalar_one_or_none()
+        user = db.session.execute(db.select(TelegramUser).filter_by(telegram_chat_id=str(chat_id))).scalar_one_or_none() # Използвайте TelegramUser
         if user:
             params = query_result.get('parameters', {}) # Get parameters as dict directly from MessageToDict output
             logger.info(f"Parsed parameters from DF CX: {params}")
@@ -285,12 +292,12 @@ def webhook():
 
     # --- DB: Log the outbound message ---
     with app.app_context():
-        user = db.session.execute(db.select(User).filter_by(telegram_chat_id=str(chat_id))).scalar_one_or_none()
+        user = db.session.execute(db.select(TelegramUser).filter_by(telegram_chat_id=str(chat_id))).scalar_one_or_none() # Използвайте TelegramUser
         if user:
             outbound_msg = ChatMessage(
                 user_id=user.id,
                 message_type='outbound',
-                text=final_fulfillment_text,
+                message_text=final_fulfillment_text, # Използвайте message_text, а не text
                 dialogflow_response_id=dfcx_response_dict.get('responseId'),
                 raw_dialogflow_json=json.dumps(dfcx_response_dict) # Store full DF CX response JSON
             )
