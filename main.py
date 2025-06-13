@@ -23,29 +23,37 @@ db = SQLAlchemy(app)
 # --- Database Models ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    telegram_chat_id = db.Column(db.String(50), unique=True, nullable=False)
-    name = db.Column(db.String(100), nullable=True)
-    email = db.Column(db.String(120), nullable=True)
-    phone = db.Column(db.String(20), nullable=True)
-    city = db.Column(db.String(50), nullable=True)
-    label = db.Column(db.String(50), nullable=True) # e.g., "courier", "non-working", or anything else you need
-    last_updated = db.Column(db.DateTime, default=db.func.now(), onupdate=db.func.now())
+    telegram_chat_id = db.Column(db.String(255), unique=True, nullable=False)
+    name = db.Column(db.String(255))
+    email = db.Column(db.String(255))
+    phone = db.Column(db.String(20))
+    city = db.Column(db.String(255))
+    label = db.Column(db.String(255)) # For storing current Dialogflow CX session/label
+    last_updated = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
 
     def __repr__(self):
-        return f"User('{self.telegram_chat_id}', '{self.name}', '{self.email}', '{self.label}')"
-
+        return f'<User {self.telegram_chat_id}>'
+    
 class ChatMessage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    message_type = db.Column(db.String(10), nullable=False) # 'inbound' or 'outbound'
-    text = db.Column(db.Text, nullable=False)
-    timestamp = db.Column(db.DateTime, default=db.func.now())
-    dialogflow_response_id = db.Column(db.String(100), nullable=True) # For linking to DF CX history
-    raw_telegram_json = db.Column(db.Text, nullable=True)
-    raw_dialogflow_json = db.Column(db.Text, nullable=True)
+    message_text = db.Column(db.Text, nullable=False)
+    is_from_user = db.Column(db.Boolean, nullable=False) # True if from user, False if from bot
+    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+message_type = db.Column(db.String(50)) # 'inbound' or 'outbound'
+    raw_telegram_json = db.Column(db.Text) # To store full Telegram request for inbound
+    dialogflow_response_id = db.Column(db.String(255)) # ID от Dialogflow CX отговора
+    raw_dialogflow_json = db.Column(db.Text) # To store full Dialogflow CX response for outbound
+
+    user = db.relationship('User', backref=db.backref('messages', lazy=True))
 
     def __repr__(self):
-        return f"ChatMessage('{self.user_id}', '{self.message_type}', '{self.timestamp}')"
+        return f'<ChatMessage {self.id} from_user={self.is_from_user}>'
+    
+with app.app_context():
+    db.create_all()
+    logger.info("Database tables checked/created.")
 
 # --- Service Account Credentials ---
 SCOPES = ['https://www.googleapis.com/auth/cloud-platform']
@@ -297,10 +305,4 @@ if __name__ == '__main__':
     # Initialize logging (moved here for clarity, though already at top)
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
-
-    with app.app_context():
-        db.create_all() # Creates tables in the database if they don't exist
-        logger.info("Database tables checked/created.")
-    # For Render, the port is usually 10000. For local testing, 5000 is common.
-    # Host '0.0.0.0' makes it accessible externally (required for Render)
     app.run(host='0.0.0.0', port=os.environ.get("PORT", 10000))
