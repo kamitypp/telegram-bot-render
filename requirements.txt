@@ -1,7 +1,7 @@
-Flask
-gunicorn                 # <--- ТОЗИ ПАКЕТ Е НУЖЕН ЗА ДЕПЛОЙ НА RENDER
-requests
-google-auth              # <--- ТОЗИ ПАКЕТ Е НУЖЕН ЗА АВТЕНТИКАЦИЯ
-google-cloud-dialogflow-cx # <-- ВАЖНО: Уверете се, че тази библиотека е там!
-Flask-SQLAlchemy
-psycopg2-binary          # <--- ТОЗИ ПАКЕТ Е НУЖЕН ЗА POSTGRESQL В RENDER
+Flask==2.3.2
+Flask-SQLAlchemy==3.1.1
+requests==2.31.0
+google-cloud-dialogflow-cx==1.17.0 # Уверете се, че версията е актуална
+gunicorn==21.2.0
+alembic==1.13.1 # Добавете този ред
+psycopg2-binary

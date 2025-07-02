@@ -1,157 +1,211 @@
 import os
 import json
-import requests
 from flask import Flask, request, jsonify
-from google.auth.transport.requests import Request
-from google.oauth2 import service_account
+from flask_sqlalchemy import SQLAlchemy # Уверете се, че този е там
+from models import db, User, ChatMessage # <-- ТОЗИ РЕД Е НОВ
+import requests
+import logging # Уверете се, че logging е импортиран, ако не е.
+from google.cloud import dialogflowcx_v3beta1 as dialogflowcx # Уверете се, че този е там
+from datetime import datetime # <-- ТОЗИ РЕД Е НОВ (нужен за timestamp)
+
 
 app = Flask(__name__)
 
-# Зареждаме service account credentials
-SCOPES = ['https://www.googleapis.com/auth/cloud-platform']
-SERVICE_ACCOUNT_FILE = "/etc/secrets/freestreets-1736017814504-fb8a19bd0fed.json"
+# >>> НАЧАЛО НА НОВИЯ КОД ЗА БАЗА ДАННИ <<<
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # Препоръчително за избягване на предупреждения
+db.init_app(app) # Инициализирайте db обекта с Flask приложението
+# >>> КРАЙ НА НОВИЯ КОД ЗА БАЗА ДАННИ <<<
 
-# Уверете се, че файлът съществува
-if not os.path.exists(SERVICE_ACCOUNT_FILE):
-    print(f"Error: Service account file not found at {SERVICE_ACCOUNT_FILE}")
-    exit(1)
+# >>> НОВ КОД ЗА ИНИЦИАЛИЗАЦИЯ НА ЛОГЪРА <<<
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+# >>> КРАЙ НА НОВ КОД ЗА ИНИЦИАЛИЗАЦИЯ НА ЛОГЪРА <<<
 
-creds = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES
-)
+# ... останалите ви настройки (като TELEGRAM_TOKEN, Dialogflow CX ID-та)
 
-# Правилна конфигурация на CX агента
-PROJECT_ID = "freestreets-1736017814504"
-REGION = "europe-west3"
-AGENT_ID = "95163a7e-670b-4e91-bbd6-71df5db9feaf"
-LANGUAGE_CODE = "bg" # Уверете се, че това съответства на езика в Dialogflow CX
+# ... останалият ви код (настройки на логър, API ключове и т.н.)
 
-def detect_dialogflow_intent(text_or_event, session_id):
+# ... (след инициализацията на логъра, но преди TELEGRAM_TOKEN и webhook)
+
+# Функция за извикване на Dialogflow CX API (предоствена от Google Cloud SDK)
+def detect_intent_texts(project_id, location_id, agent_id, session_id, text, language_code):
+    """Returns the result of detect intent with texts as inputs.
+    Using the same `session_id` between requests allows continuation of the conversation.
     """
-    Извиква Dialogflow CX detectIntent API.
-    Приема текст за потребителски вход или event name (за специални случаи).
-    Връща целия 'queryResult' отговор от Dialogflow CX.
-    """
-    session_path = f"projects/{PROJECT_ID}/locations/{REGION}/agents/{AGENT_ID}/sessions/{session_id}"
-
-    creds.refresh(Request())
-    url = f"https://{REGION}-dialogflow.googleapis.com/v3/{session_path}:detectIntent"
-    headers = {
-        "Authorization": f"Bearer {creds.token}",
-        "Content-Type": "application/json"
-    }
-
-    body = {
-        "queryInput": {
-            "text": {
-                "text": text_or_event
-            },
-            "languageCode": LANGUAGE_CODE
-        }
-    }
-
+    session_path = f"projects/{project_id}/locations/{location_id}/agents/{agent_id}/sessions/{session_id}"
+    client_options = None
+    if location_id != "global":
+        client_options = {"api_endpoint": f"{location_id}-dialogflow.googleapis.com"}
+    
+    session_client = dialogflowcx.SessionsClient(client_options=client_options)
+    
+    text_input = dialogflowcx.TextInput(text=text)
+    query_input = dialogflowcx.QueryInput(text=text_input, language_code=language_code)
+    
     try:
-        response = requests.post(url, headers=headers, json=body)
-        response.raise_for_status()
-        response_data = response.json()
-        print(f"Dialogflow CX Response: {json.dumps(response_data, indent=2)}")
-        return response_data.get("queryResult", {})
-    except requests.exceptions.RequestException as e:
-        print(f"Error calling Dialogflow CX API: {e}")
+        response = session_client.detect_intent(
+            request={"session": session_path, "query_input": query_input}
+        )
+        logger.info(f"Dialogflow CX query result: {response.query_result.fulfillment_response.messages}")
+        return response
+    except Exception as e:
+        logger.error(f"Error detecting intent for session {session_id}: {e}", exc_info=True)
         return None
+
+# TELEGRAM обработка (оставете както си е)
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+
+# ... (и сега ще заместим webhook функцията)
 
 # TELEGRAM обработка
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
-@app.route("/webhook", methods=["POST"])
+@app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
-    print(f"Received Telegram webhook data: {json.dumps(data, indent=2)}")
+    logger.info(f"Received Telegram webhook data: {json.dumps(data, indent=2)}")
 
-    if not data:
-        print("Received empty data from webhook.")
-        return jsonify({"status": "ok"})
+    message_data = data.get("message", {})
+    chat_id = message_data.get("chat", {}).get("id")
+    user_input = message_data.get("text") # Вземаме само текстовия вход от message
 
-    chat_id = None
-    user_input = None
-
-    if "message" in data:
-        chat_id = data["message"]["chat"]["id"]
-        user_input = data["message"].get("text", "")
-        print(f"Type: Message, Chat ID: {chat_id}, Text: '{user_input}'")
-    elif "callback_query" in data:
+    # Ако е callback_query (от бутон), обработваме го
+    if "callback_query" in data:
         chat_id = data["callback_query"]["message"]["chat"]["id"]
-        user_input = data["callback_query"]["data"]
+        user_input = data["callback_query"]["data"] # Данните от бутона са вход
         try:
             # Отговор на callback_query, за да изчезне "loading" състоянието на бутона в Telegram
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+            requests.post(f"https://api.telegram.org/bot{os.environ.get('TELEGRAM_BOT_TOKEN')}/answerCallbackQuery",
                           json={"callback_query_id": data["callback_query"]["id"]})
+            logger.info(f"Answered callback query for chat ID: {chat_id}")
         except Exception as e:
-            print(f"Error answering callback query: {e}")
-        print(f"Type: Callback Query, Chat ID: {chat_id}, Data: '{user_input}'")
+            logger.error(f"Error answering callback query: {e}", exc_info=True)
+        logger.info(f"Type: Callback Query, Chat ID: {chat_id}, Data: '{user_input}'")
+    elif "message" in data:
+        # Вече обработено по-горе за "text"
+        logger.info(f"Type: Message, Chat ID: {chat_id}, Text: '{user_input}'")
     else:
-        print("Received unknown update type. Ignoring.")
+        logger.warning("Received unknown update type. Ignoring.")
         return jsonify({"status": "ok"})
 
-    if not chat_id or user_input is None:
-        print("Could not extract chat_id or user_input. Ignoring.")
+
+    if not chat_id or user_input is None: # user_input може да е празен стринг
+        logger.warning("Could not extract chat_id or user_input. Ignoring.")
         return jsonify({"status": "ok"})
 
-    dfcx_query_result = detect_dialogflow_intent(user_input, str(chat_id))
-
-    if not dfcx_query_result:
+    # Извикайте Dialogflow CX
+    dfcx_response = detect_intent_texts(
+        project_id=os.environ.get('GOOGLE_CLOUD_PROJECT_ID'),
+        location_id=os.environ.get('DIALOGFLOW_AGENT_LOCATION'),
+        agent_id=os.environ.get('DIALOGFLOW_AGENT_ID'),
+        session_id=str(chat_id), # Използвайте chat_id като session_id
+        text=user_input,
+        language_code=os.environ.get('DIALOGFLOW_AGENT_LANGUAGE_CODE', 'bg') # Може да бъде променлива на средата
+    )
+    
+    # Проверка дали dfcx_response е None или липсва query_result
+    if not dfcx_response or not dfcx_response.query_result:
+        logger.error("Dialogflow CX did not return a valid query_result.")
+        # Изпращане на грешка към Telegram
         try:
             requests.post(TELEGRAM_API_URL, json={
                 "chat_id": chat_id,
-                "text": "Извинявам се, възникна проблем. Моля, опитайте отново по-късно."
+                "text": "Извинявам се, възникна проблем при обработката на вашето съобщение. Моля, опитайте отново по-късно."
             })
+            return jsonify({"status": "error", "message": "Dialogflow CX processing failed."}), 500
         except Exception as e:
-            print(f"Error sending fallback message to Telegram: {e}")
-        return jsonify({"status": "error", "message": "Failed to get response from Dialogflow CX"})
+            logger.error(f"Error sending fallback message to Telegram: {e}", exc_info=True)
+            return jsonify({"status": "error", "message": "Internal server error."}), 500
 
-    # --- НОВАТА И ПОДОБРЕНА ЛОГИКА ЗА ОБРАБОТКА НА CUSTOM PAYLOAD И БУТОНИ ---
 
-    all_fulfillment_texts = [] # Списък за събиране на всички текстови отговори
+    # Извличане на отговор от Dialogflow CX и обработка на Custom Payload
+    final_fulfillment_text = ""
     telegram_reply_markup = None
-    text_from_custom_payload = None # За да приоритизираме текста, който е директно в payload-а на Telegram
-
-    if dfcx_query_result.get("responseMessages"):
-        for msg in dfcx_query_result["responseMessages"]:
-            # Проверяваме за текстови отговори
-            if "text" in msg and msg["text"].get("text") and msg["text"]["text"][0].strip():
-                all_fulfillment_texts.append(msg["text"]["text"][0].strip())
-
-            # Проверяваме за custom payload с Telegram специфична информация
-            if "payload" in msg:
-                payload_data = msg["payload"]
-                if "telegram" in payload_data:
-                    telegram_data = payload_data["telegram"]
+    
+    # Iterate through response_messages, looking for text and custom payloads
+    if dfcx_response.query_result.response_messages:
+        for message in dfcx_response.query_result.response_messages:
+            # Get text response
+            if message.text and message.text.text:
+                # Concatenate all text responses
+                final_fulfillment_text += " ".join(message.text.text) + " "
+            
+            # Get custom payload for Telegram
+            if message.payload:
+                # Convert protobuf Struct to Python dictionary
+                payload_dict = dialogflowcx.types.struct_pb2.Struct.to_dict(message.payload)
+                if "telegram" in payload_dict:
+                    telegram_data = payload_dict["telegram"]
+                    if "text" in telegram_data and telegram_data["text"].strip():
+                        # If a 'text' field is present in the Telegram payload, prioritize it
+                        final_fulfillment_text = telegram_data["text"].strip()
                     if "reply_markup" in telegram_data:
                         telegram_reply_markup = telegram_data["reply_markup"]
-                        print(f"Found Telegram reply_markup: {json.dumps(telegram_reply_markup, indent=2)}")
+                        logger.info(f"Found Telegram reply_markup: {json.dumps(telegram_reply_markup, indent=2)}")
+                    # If we found Telegram payload, we usually stop processing other messages
+                    break # Assuming only one Telegram payload per response is expected
 
-                    # Ако custom payload съдържа и 'text' поле, това е текстът за бутоните
-                    if "text" in telegram_data and telegram_data["text"].strip():
-                        text_from_custom_payload = telegram_data["text"].strip()
-                        # Ако намерим текст в custom payload, той ще бъде основният текст за съобщението
-                        # и ще замести всички други текстове, събрани до момента, или ще бъде добавен като първи.
-                        all_fulfillment_texts = [] # Изчистваме предишните текстове
-                        all_fulfillment_texts.append(text_from_custom_payload)
-                        break # Спираме търсенето, ако намерим Telegram payload с текст и бутони
+    final_fulfillment_text = final_fulfillment_text.strip()
+    if not final_fulfillment_text:
+        final_fulfillment_text = "Няма отговор от Dialogflow CX." # Fallback if no text was found
 
-    # Изграждаме финалния текстов отговор
-    final_fulfillment_text = ""
-    if text_from_custom_payload: # Приоритет на текста от custom payload
-        final_fulfillment_text = text_from_custom_payload
-    elif all_fulfillment_texts:
-        final_fulfillment_text = "\n\n".join(all_fulfillment_texts) # Обединяваме всички събрани текстове
-    else:
-        # Fallback към queryResult.text, ако няма други отговори (малко вероятно след горната логика)
-        if dfcx_query_result.get("text") and dfcx_query_result["text"].strip():
-            final_fulfillment_text = dfcx_query_result["text"].strip()
-        else:
-            final_fulfillment_text = "Няма отговор."
+    logger.info(f"Final fulfillment text: '{final_fulfillment_text}'")
+    logger.info(f"Telegram reply markup: {json.dumps(telegram_reply_markup, indent=2) if telegram_reply_markup else 'None'}")
+
+
+    # >>> НАЧАЛО НА КОДА ЗА ЗАПИС В БАЗА ДАННИ (от предишния ми отговор) <<<
+    try:
+        with app.app_context():
+            user = User.query.filter_by(telegram_chat_id=str(chat_id)).first()
+            if not user:
+                from_data = message_data.get("from", {}) # Извличане на данни от message_data, не data
+                user = User(
+                    telegram_chat_id=str(chat_id),
+                    first_name=from_data.get("first_name"),
+                    last_name=from_data.get("last_name"),
+                    username=from_data.get("username"),
+                    language_code=from_data.get("language_code")
+                )
+                db.session.add(user)
+                db.session.commit()
+                logger.info(f"New user created: {user.telegram_chat_id}")
+
+            # Запис на входящо съобщение
+            inbound_msg = ChatMessage(
+                user_id=user.id,
+                message_type='inbound',
+                message_text=user_input,
+                is_from_user=True,
+                timestamp=datetime.fromtimestamp(message_data.get("date")) if message_data.get("date") else datetime.now(), # Използвайте времето от Telegram или текущо
+                raw_telegram_json=json.dumps(data)
+            )
+            db.session.add(inbound_msg)
+            db.session.commit()
+            logger.info(f"Inbound message for user {chat_id} logged.")
+
+            # Запис на изходящо съобщение
+            if final_fulfillment_text:
+                outbound_msg = ChatMessage(
+                    user_id=user.id,
+                    message_type='outbound',
+                    message_text=final_fulfillment_text,
+                    is_from_user=False,
+                    timestamp=datetime.now(), # Текущо време за изходящо съобщение
+                    dialogflow_response_id=dfcx_response.query_result.response_id if dfcx_response.query_result else None,
+                    raw_dialogflow_json=json.dumps(dialogflowcx.QueryResult.to_json(dfcx_response.query_result)) if dfcx_response and dfcx_response.query_result else None
+                )
+                db.session.add(outbound_msg)
+                db.session.commit()
+                logger.info(f"Outbound message for user {chat_id} logged.")
+
+    except Exception as e:
+        logger.error(f"Failed to save message to database: {e}", exc_info=True)
+        db.session.rollback() # Връщане на промените при грешка
+    # >>> КРАЙ НА КОДА ЗА ЗАПИС В БАЗА ДАННИ <<<
+
 
     # Изграждаме параметрите за изпращане до Telegram
     telegram_params = {
@@ -167,11 +221,14 @@ def webhook():
     try:
         telegram_response = requests.post(TELEGRAM_API_URL, json=telegram_params)
         telegram_response.raise_for_status()
-        print(f"Message sent to Telegram. Status: {telegram_response.status_code}")
+        logger.info(f"Message sent to Telegram. Status: {telegram_response.status_code}")
     except requests.exceptions.RequestException as e:
-        print(f"Error sending message to Telegram: {e}")
+        logger.error(f"Error sending message to Telegram: {e}", exc_info=True)
+        # Връщаме грешка, ако не можем да изпратим до Telegram
+        return jsonify({"status": "error", "message": "Failed to send message to Telegram"}), 500
 
     return jsonify({"status": "ok"})
+
 
 if __name__ == "__main__":
     app.run(port=os.environ.get("PORT", 5000), host="0.0.0.0")
