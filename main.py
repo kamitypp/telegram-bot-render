@@ -8,6 +8,8 @@ import logging # Уверете се, че logging е импортиран, ак
 from google.cloud import dialogflowcx_v3beta1 as dialogflowcx # Уверете се, че този е там
 from datetime import datetime # <-- ТОЗИ РЕД Е НОВ (нужен за timestamp)
 
+from dotenv import load_dotenv
+load_dotenv()
 
 app = Flask(__name__)
 

@@ -7,7 +7,10 @@ from alembic import context
 
 import os
 import sys
+from dotenv import load_dotenv
 
+# Зареди променливите от .env файла
+load_dotenv()
 sys.path.append(os.path.abspath('.')) 
 
 # this is the Alembic Config object, which provides
