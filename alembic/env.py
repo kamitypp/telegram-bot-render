@@ -9,9 +9,12 @@ import os
 import sys
 from dotenv import load_dotenv
 
+
 # Зареди променливите от .env файла
 load_dotenv()
 sys.path.append(os.path.abspath('.')) 
+
+print(f"DEBUG (env.py): Loaded DATABASE_URL: {os.getenv('DATABASE_URL')}")
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
