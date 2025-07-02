@@ -5,3 +5,4 @@ google-cloud-dialogflow-cx==1.17.0 # Уверете се, че версията 
 gunicorn==21.2.0
 alembic==1.13.1 # Добавете този ред
 psycopg2-binary
+python-dotenv
